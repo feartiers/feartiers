@@ -1,0 +1,407 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FearTiers Admin</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+:root{color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:#090909;color:#eee;
+font-family:Arial,sans-serif}
+header{background:#111;border-bottom:1px solid #292929;
+padding:18px;display:flex;justify-content:space-between;
+align-items:center;gap:10px}
+.logo{font-weight:900;font-size:21px}
+.logo span{color:#ef454f}
+main{max-width:900px;margin:28px auto;padding:0 14px}
+.card{background:#111;border:1px solid #292929;
+border-radius:12px;padding:20px;margin-bottom:18px}
+h2{font-size:19px;margin:0 0 16px}
+label{display:block;color:#bbb;font-size:13px;margin:13px 0 7px}
+input,select{width:100%;padding:12px;background:#191919;
+color:white;border:1px solid #383838;border-radius:7px}
+button{padding:11px 15px;border:0;border-radius:7px;
+background:#e43e49;color:white;font-weight:bold;cursor:pointer}
+button.secondary{background:#292929}
+button.danger{background:#792b31}
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.hidden{display:none!important}
+.muted{color:#999;font-size:13px}
+#message{margin-top:12px;white-space:pre-wrap;font-size:13px}
+.player{border-top:1px solid #292929;padding:14px 0;
+display:flex;justify-content:space-between;gap:12px;align-items:center}
+.player strong{overflow-wrap:anywhere}
+.player .actions{margin:0}
+.tier{color:#ff737b;font-weight:bold}
+@media(max-width:520px){
+main{margin:16px auto}
+.card{padding:15px}
+.grid{grid-template-columns:1fr}
+.player{align-items:flex-start;flex-direction:column}
+}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">🍇 Fear<span>Tiers</span> <small>Admin</small></div>
+  <button id="logout" class="secondary hidden">Logout</button>
+</header>
+
+<main>
+  <section id="loginCard" class="card">
+    <h2>Admin Login</h2>
+    <p class="muted">Sign in with your authorized administrator account.</p>
+    <form id="loginForm">
+      <label for="email">Email</label>
+      <input id="email" type="email" autocomplete="username"
+        required value="veltriex@gmail.com">
+      <label for="password">Password</label>
+      <input id="password" type="password"
+        autocomplete="current-password" required>
+      <div class="actions">
+        <button type="submit">Login</button>
+      </div>
+    </form>
+    <div id="loginMessage" class="muted"></div>
+  </section>
+
+  <section id="dashboard" class="hidden">
+    <div class="card">
+      <h2 id="formTitle">Add Player</h2>
+      <form id="playerForm">
+        <input id="playerId" type="hidden">
+
+        <label for="name">Minecraft username</label>
+        <input id="name" maxlength="40" required
+          placeholder="PlayerName">
+
+        <label for="region">Region</label>
+        <select id="region">
+          <option value="AS">Asia (AS)</option>
+          <option value="EU">Europe (EU)</option>
+          <option value="NA">North America (NA)</option>
+          <option value="SA">South America (SA)</option>
+          <option value="AF">Africa (AF)</option>
+          <option value="OC">Oceania (OC)</option>
+        </select>
+
+        <h2 style="margin-top:24px">PvP Tiers</h2>
+        <p class="muted">Har category ka tier select karo.</p>
+        <div id="tierFields" class="grid"></div>
+
+        <div class="actions">
+          <button id="saveButton" type="submit">Add Player</button>
+          <button id="cancelEdit" type="button"
+            class="secondary hidden">Cancel Edit</button>
+        </div>
+        <div id="formMessage" class="muted"></div>
+      </form>
+    </div>
+
+    <div class="card">
+      <h2>Manage Players</h2>
+      <input id="filter" placeholder="Search player..."
+        aria-label="Search players">
+      <div id="playerList" style="margin-top:14px"></div>
+    </div>
+  </section>
+</main>
+
+<script>
+const SUPABASE_URL = "https://afakfdmxcbcfomkivonh.supabase.co";
+const SUPABASE_KEY = "sb_publishable_krLgCnt4FiQMvEbRmeYA0A_ng7IagLe";
+const ADMIN_EMAIL = "veltriex@gmail.com";
+
+const db = window.supabase.createClient(
+  SUPABASE_URL, SUPABASE_KEY
+);
+
+const categories = [
+  "Overall", "Sword", "Axe", "Crystal",
+  "Netherite", "UHC", "SMP", "Mace"
+];
+
+const tierOptions = [
+  "Unranked", "LT5", "HT5", "LT4", "HT4",
+  "LT3", "HT3", "LT2", "HT2", "LT1", "HT1"
+];
+
+const $ = id => document.getElementById(id);
+let players = [];
+
+function showMessage(id, message) {
+  $(id).textContent = message;
+}
+
+function buildTierFields() {
+  const container = $("tierFields");
+  categories.forEach(category => {
+    const wrapper = document.createElement("div");
+    const label = document.createElement("label");
+    label.textContent = category;
+    label.htmlFor = "tier-" + category;
+
+    const select = document.createElement("select");
+    select.id = "tier-" + category;
+    select.dataset.category = category;
+
+    tierOptions.forEach(tier => {
+      const option = document.createElement("option");
+      option.value = tier;
+      option.textContent = tier;
+      select.appendChild(option);
+    });
+
+    wrapper.append(label, select);
+    container.appendChild(wrapper);
+  });
+}
+
+function getTiers() {
+  const tiers = {};
+  categories.forEach(category => {
+    tiers[category] = $("tier-" + category).value;
+  });
+  return tiers;
+}
+
+function resetForm() {
+  $("playerForm").reset();
+  $("playerId").value = "";
+  $("formTitle").textContent = "Add Player";
+  $("saveButton").textContent = "Add Player";
+  $("cancelEdit").classList.add("hidden");
+  showMessage("formMessage", "");
+}
+
+function startEdit(player) {
+  $("playerId").value = player.id;
+  $("name").value = player.name;
+  $("region").value = player.region || "AS";
+
+  categories.forEach(category => {
+    const value = (player.tiers || {})[category] || "Unranked";
+    $("tier-" + category).value =
+      tierOptions.includes(value) ? value : "Unranked";
+  });
+
+  $("formTitle").textContent = "Edit Player";
+  $("saveButton").textContent = "Save Changes";
+  $("cancelEdit").classList.remove("hidden");
+  showMessage("formMessage", "");
+  window.scrollTo({top: 0, behavior: "smooth"});
+}
+
+async function loadPlayers() {
+  showMessage("formMessage", "Loading players...");
+
+  const {data, error} = await db
+    .from("players")
+    .select("id,name,region,tiers,created_at")
+    .order("name", {ascending: true});
+
+  if (error) {
+    showMessage("formMessage",
+      "Could not load players: " + error.message);
+    return;
+  }
+
+  players = data || [];
+  renderPlayers();
+  showMessage("formMessage", "");
+}
+
+function renderPlayers() {
+  const list = $("playerList");
+  list.replaceChildren();
+
+  const query = $("filter").value.trim().toLowerCase();
+  const filtered = players.filter(player =>
+    player.name.toLowerCase().includes(query)
+  );
+
+  if (!filtered.length) {
+    const empty = document.createElement("p");
+    empty.className = "muted";
+    empty.textContent = "No players found.";
+    list.appendChild(empty);
+    return;
+  }
+
+  filtered.forEach(player => {
+    const row = document.createElement("div");
+    row.className = "player";
+
+    const details = document.createElement("div");
+    const name = document.createElement("strong");
+    name.textContent = player.name;
+
+    const info = document.createElement("div");
+    info.className = "muted";
+    info.style.marginTop = "7px";
+    info.textContent = (player.region || "AS") +
+      " · Overall: " + ((player.tiers || {}).Overall || "Unranked");
+
+    details.append(name, info);
+
+    const actions = document.createElement("div");
+    actions.className = "actions";
+
+    const edit = document.createElement("button");
+    edit.textContent = "Edit";
+    edit.className = "secondary";
+    edit.onclick = () => startEdit(player);
+
+    const remove = document.createElement("button");
+    remove.textContent = "Delete";
+    remove.className = "danger";
+    remove.onclick = () => deletePlayer(player);
+
+    actions.append(edit, remove);
+    row.append(details, actions);
+    list.appendChild(row);
+  });
+}
+
+async function checkSession() {
+  const {data, error} = await db.auth.getSession();
+
+  if (error) {
+    showMessage("loginMessage", error.message);
+    return;
+  }
+
+  const user = data.session?.user;
+
+  if (!user) {
+    $("loginCard").classList.remove("hidden");
+    $("dashboard").classList.add("hidden");
+    $("logout").classList.add("hidden");
+    return;
+  }
+
+  if ((user.email || "").toLowerCase() !== ADMIN_EMAIL.toLowerCase()) {
+    await db.auth.signOut();
+    showMessage("loginMessage",
+      "This account is not authorized for FearTiers Admin.");
+    return;
+  }
+
+  $("loginCard").classList.add("hidden");
+  $("dashboard").classList.remove("hidden");
+  $("logout").classList.remove("hidden");
+  await loadPlayers();
+}
+
+$("loginForm").addEventListener("submit", async event => {
+  event.preventDefault();
+  showMessage("loginMessage", "Signing in...");
+
+  const {error} = await db.auth.signInWithPassword({
+    email: $("email").value.trim(),
+    password: $("password").value
+  });
+
+  if (error) {
+    showMessage("loginMessage",
+      "Login failed: " + error.message);
+    return;
+  }
+
+  await checkSession();
+});
+
+$("logout").addEventListener("click", async () => {
+  await db.auth.signOut();
+  $("password").value = "";
+  resetForm();
+  await checkSession();
+});
+
+$("playerForm").addEventListener("submit", async event => {
+  event.preventDefault();
+
+  const {data: sessionData} = await db.auth.getSession();
+  const user = sessionData.session?.user;
+
+  if (!user || (user.email || "").toLowerCase() !==
+      ADMIN_EMAIL.toLowerCase()) {
+    showMessage("formMessage", "Please log in with the admin account.");
+    return;
+  }
+
+  const name = $("name").value.trim();
+
+  if (!name) {
+    showMessage("formMessage", "Enter a player username.");
+    return;
+  }
+
+  const payload = {
+    name,
+    region: $("region").value,
+    tiers: getTiers()
+  };
+
+  const id = $("playerId").value;
+  $("saveButton").disabled = true;
+  showMessage("formMessage", "Saving...");
+
+  const result = id
+    ? await db.from("players").update(payload).eq("id", id)
+    : await db.from("players").insert(payload);
+
+  $("saveButton").disabled = false;
+
+  if (result.error) {
+    showMessage("formMessage",
+      "Save failed: " + result.error.message);
+    return;
+  }
+
+  resetForm();
+  showMessage("formMessage", "Player saved successfully!");
+  await loadPlayers();
+});
+
+$("cancelEdit").addEventListener("click", resetForm);
+$("filter").addEventListener("input", renderPlayers);
+
+async function deletePlayer(player) {
+  if (!confirm("Delete player " + player.name + "?")) return;
+
+  const {data: sessionData} = await db.auth.getSession();
+  const user = sessionData.session?.user;
+
+  if (!user || (user.email || "").toLowerCase() !==
+      ADMIN_EMAIL.toLowerCase()) {
+    alert("Admin login required.");
+    return;
+  }
+
+  const {error} = await db
+    .from("players")
+    .delete()
+    .eq("id", player.id);
+
+  if (error) {
+    alert("Delete failed: " + error.message);
+    return;
+  }
+
+  await loadPlayers();
+}
+
+buildTierFields();
+checkSession();
+
+db.auth.onAuthStateChange(() => {
+  setTimeout(checkSession, 0);
+});
+</script>
+</body>
+  </html>
